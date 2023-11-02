@@ -44,24 +44,15 @@ pip install -r requirements.txt
 
 ## Env
 
-To use this, you'll need a [github personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token).
-
-Duplicate `.env.example` and rename it to `.env`. Then, add your access token to the `ACCESS_TOKEN` variable.
-
-**NOTE**: The token owner must have access to the source repo.
+Duplicate `.env.example` and rename it to `.env` and set the values properly.
+1. `ACCESS_TOKEN` - A [github personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) generated in the GitHub account that is allowed to create/update repositories in the organization.
+2. `GITHUB_ORGANIZATION` - The name of the GitHub organization that the repositories will be created in.
+3. `SOURCE_REPO_URL` - The URL of the source repository that will be cloned.
+4. `TARGET_REPO_NAME` - The name of the target repository that will be created.
+5. `COMMIT_HASH` - The commit hash of the source repository that will be cloned.
 
 # Usage
-
+Make sure you have all values in the `.env` file set properly and then run the following command:
 ```bash
 python audit_repo_cloner/create_audit_repo.py
 ```
-
-You will be asked to input the following:
-1) Source repo url
- Enter the link to the source repo URL (e.g. `https://github.com/Cyfrin/foundry-full-course-f23`).
-2) Target repo name
- If leave blank, it will default to `audit-source repo name` with `audit` prefix (e.g. `audit-foundry-full-course-f23`).
-3) Audit commit hash:
- Enter the commit hash provided by the client (e.g. `25d62b685857f5c1906675a3876d7d7773a8b3bd`).
-
-After a few moments, you'll have a repo ready for audit!

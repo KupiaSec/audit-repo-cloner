@@ -1,4 +1,5 @@
 import os
+import requests
 from datetime import date
 from typing import List, Optional, Tuple
 from github import Github, GithubException, Repository, Organization
@@ -17,20 +18,16 @@ from constants import (
     DEFAULT_LABELS,
     SEVERITY_DATA,
     TRELLO_LABELS,
-    TRELLO_COLUMNS,
+    BOARD_COLUMNS,
 )
 
 log.basicConfig(level=log.INFO)
 
+# Load env values
 load_dotenv()
 
 # Globals are shit. We should refactor again in the future...
-REPORT_BRANCH_NAME = "report"
 MAIN_BRANCH_NAME = "main"
-SUBTREE_URL = "https://github.com/Cyfrin/report-generator-template.git"
-SUBTREE_NAME = "report-generator-template"
-SUBTREE_PATH_PREFIX = "cyfrin-report"
-GITHUB_WORKFLOW_ACTION_NAME = "generate-report"
 
 
 @click.command()
@@ -38,22 +35,18 @@ GITHUB_WORKFLOW_ACTION_NAME = "generate-report"
     version=__version__,
     prog_name=__title__,
 )
-@click.option("--config", type=click.Path(exists=True), help="Path to YAML config file")
 @click.option(
     "--prompt/--no-prompt",
     default=True,
     help="Have this CLI be interactive by prompting or pass in args via the command.",
 )
-@click.option("--source-url", default=None, help="Source repository URL.")
+@click.option("--source-url", default=os.getenv("SOURCE_REPO_URL"), help="Source repository URL.")
 @click.option(
     "--target-repo-name",
-    default=None,
+    default=os.getenv("TARGET_REPO_NAME"),
     help="Target repository name (leave blank to use source repo name).",
 )
-@click.option("--commit-hash", default=None, help="Audit commit hash.")
-@click.option(
-    "--auditors", default=None, help="Names of the auditors (separated by spaces)."
-)
+@click.option("--commit-hash", default=os.getenv("COMMIT_HASH"), help="Audit commit hash.")
 @click.option(
     "--github-token",
     default=os.getenv("ACCESS_TOKEN"),
@@ -65,60 +58,39 @@ GITHUB_WORKFLOW_ACTION_NAME = "generate-report"
     help="Your GitHub organization name in which to clone the repo.",
 )
 def create_audit_repo(
-    config: str,
     prompt: bool,
     source_url: str,
     target_repo_name: str,
     commit_hash: str,
-    auditors: str,
     github_token: str,
     organization: str,
 ):
-    """This function clones a target repository and prepares it for a Cyfrin audit using the provided arguments.
-    If the prompt flag is set to true (default), the user will be prompted for the source repository URL and auditor names.
-    If the prompt flag is set to false, the function will use the provided click arguments for the source repository URL and auditor names.
+    """This function clones a target repository and prepares it for a Kupia audit using the provided arguments.
+    If the prompt flag is set to true (default), the user will be prompted for the source repository URL.
+    If the prompt flag is set to false, the function will use the provided click arguments for the source repository URL.
 
     Args:
         prompt (bool): Determines if the script should use default prompts for input or the provided click arguments.
-        source_url (str): The URL of the source repository to be cloned and prepared for the Cyfrin audit.
+        source_url (str): The URL of the source repository to be cloned and prepared for the Kupia audit.
         target_repo_name (str): The name of the target repository to be created.
-        auditors (str): A space-separated list of auditor names who will be assigned to the audit.
         github_token (str): The GitHub developer token to make API calls.
         organization (str): The GitHub organization to create the audit repository in.
 
     Returns:
         None
     """
-    if config:
-        (
-            source_url,
-            target_repo_name,
-            commit_hash,
-            auditors,
-            github_token,
-            organization,
-        ) = load_config(
-            config,
-            source_url=source_url,
-            target_repo_name=target_repo_name,
-            commit_hash=commit_hash,
-            auditors=auditors,
-            github_token=github_token,
-            organization=organization,
-        )
-    if prompt:
-        (
-            source_url,
-            target_repo_name,
-            commit_hash,
-            auditors,
-            organization,
-        ) = prompt_for_details(
-            source_url, target_repo_name, commit_hash, auditors, organization
-        )
-    if not source_url or not commit_hash or not auditors or not organization:
+    # prompt if any info is not given
+    (
+        source_url,
+        target_repo_name,
+        commit_hash,
+        organization,
+    ) = prompt_for_details(
+        source_url, target_repo_name, commit_hash, organization
+    )
+    if not source_url or not commit_hash or not organization:
         raise click.UsageError(
-            "Source URL, commit hash, organization, and auditors must be provided either through --prompt, config, or as options."
+            "Source URL, commit hash, and organization must be provided either through --prompt, config, or as options."
         )
     if not github_token:
         raise click.UsageError(
@@ -129,12 +101,10 @@ def create_audit_repo(
     url_parts = source_url.split("/")
     source_username = url_parts[-2]
     source_repo_name = url_parts[-1]
-    auditors_list: List[str] = [a.strip() for a in auditors.split(" ")]
-    subtree_path = f"{SUBTREE_PATH_PREFIX}/{SUBTREE_NAME}"
 
     # if target_repo_name is not provided, attempt to use the source repo name
     if not target_repo_name:
-        target_repo_name = source_repo_name
+        target_repo_name = 'audit-' + source_repo_name
 
     with tempfile.TemporaryDirectory() as temp_dir:
         repo = try_clone_repo(
@@ -150,218 +120,14 @@ def create_audit_repo(
         repo = create_audit_tag(repo, temp_dir, commit_hash)
         repo = add_issue_template_to_repo(repo)
         repo = replace_labels_in_repo(repo)
-        repo = create_branches_for_auditors(repo, auditors_list, commit_hash)
-        repo = create_report_branch(repo, commit_hash)
-        repo = add_subtree(
-            repo,
-            source_repo_name,
-            target_repo_name,
-            source_username,
-            organization,
-            temp_dir,
-            subtree_path,
-            commit_hash,
-        )
-        repo = set_up_ci(repo, subtree_path)
-        repo = set_up_project_board(repo, source_username, target_repo_name)
+        # repo = set_up_project_board(repo, source_username, target_repo_name)
 
     print("Done!")
-
-
-def add_subtree(
-    repo: Repository,
-    source_repo_name: str,
-    target_repo_name: str,
-    source_username: str,
-    organization: str,
-    repo_path: str,
-    subtree_path: str,
-    commit_hash: str,
-):
-    # Add report-generator-template as a subtree
-
-    try:
-        print(f"Adding subtree {SUBTREE_NAME}...")
-
-        # Pull the latest changes from the origin
-        subprocess.run(
-            f"git -C {repo_path} pull origin {REPORT_BRANCH_NAME} --rebase", shell=True
-        )
-        subprocess.run(f"git -C {repo_path} checkout {REPORT_BRANCH_NAME}", shell=True)
-
-        # Add the subtree to the repo
-        subprocess.run(
-            f"git -C {repo_path} subtree add --prefix {subtree_path} {SUBTREE_URL} {MAIN_BRANCH_NAME} --squash",
-            shell=True,
-        )
-        os.makedirs(f"{repo_path}/.github/workflows", exist_ok=True)
-        subprocess.run(
-            f"mv {repo_path}/{subtree_path}/.github/workflows/main.yml {repo_path}/.github/workflows/main.yml",
-            shell=True,
-        )
-
-        with open(
-            f"{repo_path}/{subtree_path}/source/summary_information.conf", "r"
-        ) as f:
-            summary_information = f.read()
-
-            summary_information = re.sub(
-                r"^project_github = .*$",
-                f"project_github = https://github.com/{source_username}/{source_repo_name}.git",
-                summary_information,
-                flags=re.MULTILINE,
-            )
-
-            summary_information = re.sub(
-                r"^private_github = .*$",
-                f"private_github = https://github.com/{organization}/{target_repo_name}.git",
-                summary_information,
-                flags=re.MULTILINE,
-            )
-
-            summary_information = re.sub(
-                r"^commit_hash = .*$",
-                f"commit_hash = {commit_hash}",
-                summary_information,
-                flags=re.MULTILINE,
-            )
-
-            with open(
-                f"{repo_path}/{subtree_path}/source/summary_information.conf", "w"
-            ) as f:
-                f.write(summary_information)
-
-        subprocess.run(f"git -C {repo_path} add .", shell=True)
-        subprocess.run(
-            f"git -C {repo_path}  commit -m 'install: {SUBTREE_NAME}'", shell=True
-        )
-
-        # Push the changes back to the origin
-        subprocess.run(
-            f"git -C {repo_path} push origin {REPORT_BRANCH_NAME}", shell=True
-        )
-
-        print(
-            f"The subtree {SUBTREE_NAME} has been added to {repo.name} on branch {REPORT_BRANCH_NAME}"
-        )
-
-    except GithubException as e:
-        log.error(f"Error adding subtree: {e}")
-        repo.delete()
-        exit()
-
-    return repo
-
-
-def set_up_ci(repo, subtree_path: str):
-    try:
-        create_action(
-            repo,
-            GITHUB_WORKFLOW_ACTION_NAME,
-            subtree_path,
-            REPORT_BRANCH_NAME,
-            str(date.today()),
-        )
-    except Exception as e:
-        log.warn(f"Error occurred while setting up CI: {str(e)}")
-        log.warn("Please set up CI manually using the report-generation.yml file.")
-
-    return repo
-
-
-def set_up_project_board(repo, source_username: str, target_repo_name: str):
-    try:
-        repo.edit(has_projects=True)
-        project = repo.create_project(
-            f"{source_username}/{target_repo_name}",
-            body=f"A collaborative board for the {source_username}/{target_repo_name} audit",
-        )
-        columns = [project.create_column(name) for name in TRELLO_COLUMNS]
-        project.create_custom_field(
-            name="Status", type="dropdown", possible_values=TRELLO_LABELS
-        )
-        project.create_custom_field(name="PoC", type="boolean")
-
-        # Define the column-to-label mapping
-        column_to_label_mapping = {
-            column: label for column, label in zip(columns, TRELLO_LABELS)
-        }
-
-        # Define the workflow action
-        def handle_card_move(event):
-            card = event.project_card
-            column = card.column
-            label = column_to_label_mapping.get(column)
-            if label:
-                issue = card.get_content()
-                issue.add_to_labels(label)
-
-        # Register the workflow
-        project.add_to_event_handlers("project_card_move", handle_card_move)
-        print("Project board has been set up successfully!")
-    except Exception as e:
-        print(f"Error occurred while setting up project board: {str(e)}")
-        print("Please set up project board manually.")
-
-    return repo
-
-
-def load_config(
-    config: str,
-    source_url: Optional[str] = None,
-    target_repo_name: Optional[str] = None,
-    auditors: Optional[str] = None,
-    github_token: Optional[str] = None,
-    organization: Optional[str] = None,
-) -> Tuple[str, str, str, str]:
-    """Loads the configuration file and returns the values.
-
-    Args:
-        config (str): The path to the configuration file.
-        source_url (Optional[str], optional): The URL you want to download. Defaults to None.
-        target_repo_name (Optional[str], optional): The name of the target repository. Defaults to None.
-        auditors (Optional[str], optional): The list of auditors separated by spaces. Defaults to None.
-        github_token (Optional[str], optional): The GitHub token to use. Defaults to None.
-        organization (Optional[str], optional): The organization to make the github repo. Defaults to None.
-
-    Returns:
-        Tuple[str, str, str, str]: The source URL, auditors, GitHub token, and organization.
-    """
-    with open(config, "r") as f:
-        config_data = yaml.safe_load(f)
-        source_url = (
-            config_data.get("source_url", source_url)
-            if source_url is None
-            else source_url
-        )
-
-        target_repo_name = (
-            config_data.get("target_repo_name", target_repo_name)
-            if target_repo_name is None
-            else target_repo_name
-        )
-
-        auditors = (
-            config_data.get("auditors", auditors) if auditors is None else auditors
-        )
-        github_token = (
-            config_data.get("github_token", github_token)
-            if github_token is None
-            else github_token
-        )
-        organization = (
-            config_data.get("organization", organization)
-            if organization is None
-            else organization
-        )
-    return source_url, target_repo_name, auditors, github_token, organization
-
 
 def prompt_for_details(
     source_url: str,
     target_repo_name: str,
     commit_hash: str,
-    auditors: str,
     organization: str,
 ):
     while True:
@@ -369,7 +135,7 @@ def prompt_for_details(
 
         if not source_url:
             source_url = input(
-                f"Hello! This script will clone the source repository and prepare it for a Cyfrin audit. Please enter the following details:\n\n{prompt_counter}) Source repo url: "
+                f"Hello! This script will clone the source repository and prepare it for a Kupia audit. Please enter the following details:\n\n{prompt_counter}) Source repo url: "
             )
             prompt_counter += 1
         if not target_repo_name:
@@ -382,21 +148,16 @@ def prompt_for_details(
                 f"\n{prompt_counter}) Audit commit hash (be sure to copy the full SHA): "
             )
             prompt_counter += 1
-        if not auditors:
-            auditors = input(
-                f"\n{prompt_counter}) Enter the names of the auditors (separated by spaces): "
-            )
-            prompt_counter += 1
         if not organization:
             organization = input(
                 f"\n{prompt_counter}) Enter the name of the organization to create the audit repository in: "
             )
             prompt_counter += 1
 
-        if source_url and commit_hash and auditors and organization:
+        if source_url and commit_hash and organization:
             break
         print("Please fill in all the details.")
-    return source_url, target_repo_name, commit_hash, auditors, organization
+    return source_url, target_repo_name, commit_hash, organization
 
 
 def try_clone_repo(
@@ -591,8 +352,8 @@ def create_audit_tag(repo, repo_path, commit_hash) -> Repository:
 
     try:
         tag = repo.create_git_tag(
-            tag="cyfrin-audit",
-            message="Cyfrin audit tag",
+            tag="kupia-audit",
+            message="Kupia audit tag",
             object=commit_hash,
             type="commit",
         )
@@ -605,10 +366,10 @@ def create_audit_tag(repo, repo_path, commit_hash) -> Repository:
 
         try:
             # Create the tag at the specific commit hash
-            subprocess.run(["git", "-C", repo_path, "tag", "cyfrin-audit", commit_hash])
+            subprocess.run(["git", "-C", repo_path, "tag", "kupia-audit", commit_hash])
 
             # Push the tag to the remote repository
-            subprocess.run(["git", "-C", repo_path, "push", "origin", "cyfrin-audit"])
+            subprocess.run(["git", "-C", repo_path, "push", "origin", "kupia-audit"])
         except GithubException as e:
             log.error(f"Error creating audit tag manually: {e}")
             repo.delete()
@@ -655,38 +416,49 @@ def create_new_labels(repo) -> Repository:
     return repo
 
 
-def create_branches_for_auditors(repo, auditors_list, commit_hash) -> Repository:
-    for auditor in auditors_list:
-        branch_name = f"audit/{auditor}"
-        try:
-            repo.create_git_ref(f"refs/heads/{branch_name}", commit_hash)
-        except GithubException as e:
-            if e.status == 422:
-                log.warn(f"Branch {branch_name} already exists. Skipping...")
-                continue
-            else:
-                log.error(f"Error creating branch: {e}")
-                repo.delete()
-                exit()
-    return repo
-
-
 def replace_labels_in_repo(repo) -> Repository:
     repo = delete_default_labels(repo)
     repo = create_new_labels(repo)
     return repo
 
-
-def create_report_branch(repo, commit_hash) -> Repository:
+# IMPORTANT: project creation via REST API is not supported anymore
+# https://stackoverflow.com/questions/73268885/unable-to-create-project-in-repository-or-organisation-using-github-rest-api
+# we will separate the project board related things into a new tool - GitProjectManager
+def set_up_project_board(repo, source_username: str, target_repo_name: str):
     try:
-        repo.create_git_ref(ref=f"refs/heads/{REPORT_BRANCH_NAME}", sha=commit_hash)
-    except GithubException as e:
-        if e.status == 422:
-            log.warn(f"Branch {REPORT_BRANCH_NAME} already exists. Skipping...")
-        else:
-            log.error(f"Error creating branch: {e}")
-            repo.delete()
-            exit()
+
+        # repo.edit(has_projects=True)
+        # project = repo.create_project(
+        #     f"{source_username}/{target_repo_name}",
+        #     body=f"A collaborative board for the {source_username}/{target_repo_name} audit",
+        # )
+        # columns = [project.create_column(name) for name in BOARD_COLUMNS]
+        # project.create_custom_field(
+        #     name="Status", type="dropdown", possible_values=TRELLO_LABELS
+        # )
+        # project.create_custom_field(name="PoC", type="boolean")
+
+        # # Define the column-to-label mapping
+        # column_to_label_mapping = {
+        #     column: label for column, label in zip(columns, TRELLO_LABELS)
+        # }
+
+        # # Define the workflow action
+        # def handle_card_move(event):
+        #     card = event.project_card
+        #     column = card.column
+        #     label = column_to_label_mapping.get(column)
+        #     if label:
+        #         issue = card.get_content()
+        #         issue.add_to_labels(label)
+
+        # # Register the workflow
+        # project.add_to_event_handlers("project_card_move", handle_card_move)
+        print("Project board has been set up successfully!")
+    except Exception as e:
+        print(f"Error occurred while setting up project board: {str(e)}")
+        print("Please set up project board manually.")
+
     return repo
 
 

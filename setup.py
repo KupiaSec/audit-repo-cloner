@@ -58,7 +58,7 @@ setup(
     ],
     packages=[about["__title__"]],
     python_requires=">=3.7, <4",
-    url="https://github.com/Cyfrin/audit-repo-cloner",
+    url="https://github.com/Kupia/audit-repo-cloner",
     long_description=readme,
     long_description_content_type="text/markdown",
     classifiers=[

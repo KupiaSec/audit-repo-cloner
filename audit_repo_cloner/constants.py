@@ -8,15 +8,15 @@ assignees: ''
 
 **Description:**
 
-**Impact:**
+**Severity:**
 
 **Proof of Concept:**
 
 **Recommended Mitigation:**
 
-**[Project]:** 
+**Client:**
 
-**Cyfrin:**"""
+**Kupia:**"""
 
 DEFAULT_LABELS = [
     "bug",
@@ -50,4 +50,4 @@ TRELLO_LABELS = [
     "Co-Validated",
     "Report Ready",
 ]
-TRELLO_COLUMNS = ["Archive", "Ideas", "Findings", "Peer Reviewed", "Report"]
+BOARD_COLUMNS = ["Phase 1 - Solo Audit By Lead", "Phase 2 - Bug Bounty", "Final - Mitigation Review"]

@@ -43,11 +43,3 @@ SEVERITY_DATA = [
     {"name": "Report Status: Resolved", "color": "0E8A16"},
     {"name": "Report Status: Closed", "color": "bfdadc"},
 ]
-TRELLO_LABELS = [
-    "Archived",
-    "Needs Discussion",
-    "Self-Validated",
-    "Co-Validated",
-    "Report Ready",
-]
-BOARD_COLUMNS = ["Phase 1 - Solo Audit By Lead", "Phase 2 - Bug Bounty", "Final - Mitigation Review"]

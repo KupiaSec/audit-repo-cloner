@@ -45,11 +45,13 @@ pip install -r requirements.txt
 ## Env
 
 Duplicate `.env.example` and rename it to `.env` and set the values properly.
-1. `ACCESS_TOKEN` - A [github personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) generated in the GitHub account that is allowed to create/update repositories in the organization.
+1. `GITHUB_ACCESS_TOKEN` - A [github personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token) generated in the GitHub account that is allowed to create/update repositories in the organization.
 2. `GITHUB_ORGANIZATION` - The name of the GitHub organization that the repositories will be created in.
 3. `SOURCE_REPO_URL` - The URL of the source repository that will be cloned.
 4. `TARGET_REPO_NAME` - The name of the target repository that will be created.
 5. `COMMIT_HASH` - The commit hash of the source repository that will be cloned.
+6. `PROJECT_TEMPLATE_ID` - The ID of the project template that will be used to create the project in the target repository. This can be retrieved by going to the project template in the target repository and copying the ID from the URL. For example, if the URL is `https://github.com/orgs/KupiaSec/projects/7/views/2`, the ID would be `7`.
+7. `PROJECT_TITLE` - The title of the project that will be created.
 
 # Usage
 Make sure you have all values in the `.env` file set properly and then run the following command:

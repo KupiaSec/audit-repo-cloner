@@ -12,13 +12,12 @@ import logging as log
 import yaml
 import re
 from __version__ import __version__, __title__
+from github_project_utils import clone_project
 
 from constants import (
     ISSUE_TEMPLATE,
     DEFAULT_LABELS,
     SEVERITY_DATA,
-    TRELLO_LABELS,
-    BOARD_COLUMNS,
 )
 
 log.basicConfig(level=log.INFO)
@@ -35,11 +34,6 @@ MAIN_BRANCH_NAME = "main"
     version=__version__,
     prog_name=__title__,
 )
-@click.option(
-    "--prompt/--no-prompt",
-    default=True,
-    help="Have this CLI be interactive by prompting or pass in args via the command.",
-)
 @click.option("--source-url", default=os.getenv("SOURCE_REPO_URL"), help="Source repository URL.")
 @click.option(
     "--target-repo-name",
@@ -49,7 +43,7 @@ MAIN_BRANCH_NAME = "main"
 @click.option("--commit-hash", default=os.getenv("COMMIT_HASH"), help="Audit commit hash.")
 @click.option(
     "--github-token",
-    default=os.getenv("ACCESS_TOKEN"),
+    default=os.getenv("GITHUB_ACCESS_TOKEN"),
     help="Your GitHub developer token to make API calls.",
 )
 @click.option(
@@ -57,20 +51,27 @@ MAIN_BRANCH_NAME = "main"
     default=os.getenv("GITHUB_ORGANIZATION"),
     help="Your GitHub organization name in which to clone the repo.",
 )
+@click.option(
+    "--project-template-id",
+    default=os.getenv("PROJECT_TEMPLATE_ID"),
+    help="ID from the project template URL.",
+)
+@click.option(
+    "--project-title",
+    default=os.getenv("PROJECT_TITLE"),
+    help="Title of the new project.",
+)
 def create_audit_repo(
-    prompt: bool,
     source_url: str,
     target_repo_name: str,
     commit_hash: str,
     github_token: str,
     organization: str,
+    project_template_id: str,
+    project_title: str
 ):
     """This function clones a target repository and prepares it for a Kupia audit using the provided arguments.
-    If the prompt flag is set to true (default), the user will be prompted for the source repository URL.
-    If the prompt flag is set to false, the function will use the provided click arguments for the source repository URL.
-
     Args:
-        prompt (bool): Determines if the script should use default prompts for input or the provided click arguments.
         source_url (str): The URL of the source repository to be cloned and prepared for the Kupia audit.
         target_repo_name (str): The name of the target repository to be created.
         github_token (str): The GitHub developer token to make API calls.
@@ -79,7 +80,7 @@ def create_audit_repo(
     Returns:
         None
     """
-    # prompt if any info is not given
+    # prompt if any mandatory info is not given
     (
         source_url,
         target_repo_name,
@@ -120,7 +121,10 @@ def create_audit_repo(
         repo = create_audit_tag(repo, temp_dir, commit_hash)
         repo = add_issue_template_to_repo(repo)
         repo = replace_labels_in_repo(repo)
-        # repo = set_up_project_board(repo, source_username, target_repo_name)
+
+    # create project board optionally
+    if project_template_id and project_title:
+        set_up_project_board(token=github_token, org_name=organization, project_template_id=project_template_id, project_title=project_title)
 
     print("Done!")
 
@@ -423,43 +427,16 @@ def replace_labels_in_repo(repo) -> Repository:
 
 # IMPORTANT: project creation via REST API is not supported anymore
 # https://stackoverflow.com/questions/73268885/unable-to-create-project-in-repository-or-organisation-using-github-rest-api
-# we will separate the project board related things into a new tool - GitProjectManager
-def set_up_project_board(repo, source_username: str, target_repo_name: str):
+# we use a non-standard way to access GitHub's GraphQL
+
+def set_up_project_board(token:str, org_name:str, project_template_id:str, project_title:str):
     try:
-
-        # repo.edit(has_projects=True)
-        # project = repo.create_project(
-        #     f"{source_username}/{target_repo_name}",
-        #     body=f"A collaborative board for the {source_username}/{target_repo_name} audit",
-        # )
-        # columns = [project.create_column(name) for name in BOARD_COLUMNS]
-        # project.create_custom_field(
-        #     name="Status", type="dropdown", possible_values=TRELLO_LABELS
-        # )
-        # project.create_custom_field(name="PoC", type="boolean")
-
-        # # Define the column-to-label mapping
-        # column_to_label_mapping = {
-        #     column: label for column, label in zip(columns, TRELLO_LABELS)
-        # }
-
-        # # Define the workflow action
-        # def handle_card_move(event):
-        #     card = event.project_card
-        #     column = card.column
-        #     label = column_to_label_mapping.get(column)
-        #     if label:
-        #         issue = card.get_content()
-        #         issue.add_to_labels(label)
-
-        # # Register the workflow
-        # project.add_to_event_handlers("project_card_move", handle_card_move)
+        clone_project(token, org_name, project_template_id, project_title)
         print("Project board has been set up successfully!")
     except Exception as e:
         print(f"Error occurred while setting up project board: {str(e)}")
         print("Please set up project board manually.")
-
-    return repo
+    return
 
 
 if __name__ == "__main__":
